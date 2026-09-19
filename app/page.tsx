@@ -30,6 +30,7 @@ import {
 import { DEFAULT_CONFIG, DEFAULT_SCENARIO, SOURCES } from "@/domain/config";
 import type { CityConfig, Role, YearPolicy, YearResult } from "@/domain/types";
 import { CATEGORIES, consumptionProfile } from "@/domain/systems/households";
+import { WealthDemand } from "@/components/economy/wealth-demand";
 import { Forecast } from "@/components/economy/forecast";
 import { useSimulation } from "@/components/economy/use-simulation";
 const number = (n: number) => Math.round(n).toLocaleString("en-US");
@@ -360,6 +361,7 @@ export default function Home() {
                 <Tabs defaultValue="overview" className="result-tabs">
                   <TabsList variant="line" className="view-tabs">
                     <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="wealth">Wealth & demand</TabsTrigger>
                     <TabsTrigger value="companies">Companies</TabsTrigger>
                     <TabsTrigger value="households">Households</TabsTrigger>
                     <TabsTrigger value="model">Model & sources</TabsTrigger>
@@ -462,7 +464,7 @@ export default function Home() {
                           <strong>{number(r.vacancies)}</strong>
                         </div>
                         <div className="labor-footnote">
-                          Providers add openings as automation revenue grows.
+                          {number(r.newClosures)} firms closed this year; {number(r.closureLayoffs)} of the demand layoffs came from closures.
                         </div>
                       </section>
                     </div>
@@ -523,6 +525,9 @@ export default function Home() {
                       </div>
                     </section>
                   </TabsContent>
+                  <TabsContent value="wealth">
+                    <WealthDemand result={result} selected={r} />
+                  </TabsContent>
                   <TabsContent value="companies">
                     <section className="panel detail-panel">
                       <div className="panel-title">
@@ -538,7 +543,7 @@ export default function Home() {
                         <TableHeader>
                           <TableRow>
                             <TableHead>Sector</TableHead>
-                            <TableHead>Firms</TableHead>
+                            <TableHead>Active / closed firms</TableHead>
                             <TableHead>White-collar</TableHead>
                             <TableHead>Blue-collar</TableHead>
                             <TableHead>Open jobs</TableHead>
@@ -559,7 +564,7 @@ export default function Home() {
                                   <ArrowUpRight size={13} />
                                 </button>
                               </TableCell>
-                              <TableCell>{number(s.companies)}</TableCell>
+                              <TableCell>{number(s.companies)} / {number(s.closedCompanies)}</TableCell>
                               <TableCell>{number(s.workers.white)}</TableCell>
                               <TableCell>{number(s.workers.blue)}</TableCell>
                               <TableCell>{number(s.vacancies)}</TableCell>
@@ -583,6 +588,7 @@ export default function Home() {
                           <TableHeader>
                             <TableRow>
                               <TableHead>Company</TableHead>
+                              <TableHead>Status / shareholders</TableHead>
                               <TableHead>Employees</TableHead>
                               <TableHead>Vacancies</TableHead>
                               <TableHead>Automated roles</TableHead>
@@ -596,6 +602,7 @@ export default function Home() {
                               .map((c) => (
                                 <TableRow key={c.id}>
                                   <TableCell>{c.name}</TableCell>
+                                  <TableCell>{c.closed ? "Closed" : "Active"} · {c.shareholderCount} owners</TableCell>
                                   <TableCell>
                                     {number(c.workers.white + c.workers.blue)}
                                   </TableCell>
@@ -831,7 +838,7 @@ function Model({
             [
               "04",
               "Carry the effects forward",
-              "Falling revenue causes additional layoffs next year. Automation remains in place; vacancies and citizens retain their state.",
+              "Falling demand shifts sales toward larger firms. Small firms with excess capacity close first, creating more layoffs next year. Profits fund shareholder dividends and accumulated wealth.",
             ],
           ].map(([n, title, body]) => (
             <div key={n}>
@@ -889,11 +896,10 @@ function Model({
         </p>
         <p>
           All goods, services, and automation are local. Household budgets
-          include dependents; pension income and household wealth are omitted.
-          Investment follows consumption. Internal supplier purchases are
+          include dependents; pension income and pre-existing wealth are omitted.
+          Savings and ownership wealth accumulate from zero. Investment is financed by available cash and limited by consumer demand. Internal supplier purchases are
           modeled without separate input bottlenecks. Government can borrow
-          locally without a debt limit or interest cost; company losses do not
-          trigger bankruptcy.
+          locally without a debt limit or interest cost. Loss-making firms with sharply reduced sales close when their sector has excess capacity; the last supplier remains to preserve local supply links.
         </p>
         <div className="accounting-box">
           <strong>

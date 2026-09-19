@@ -4,7 +4,10 @@ import { DEFAULT_CONFIG, DEFAULT_SCENARIO } from "../config";
 import { CityFactory } from "../factories/city-factory";
 import { CitizenFactory } from "../factories/citizen-factory";
 import { simulate } from "../simulation";
-import { consumptionProfile } from "../systems/households";
+import { transitionLabor } from "../systems/labor";
+import { productionAccounts } from "../systems/production";
+import { assignShareholders, payDividends } from "../systems/ownership";
+import { consumptionProfile, householdAccounts, settleHouseholds } from "../systems/households";
 import type { CityConfig } from "../types";
 // A smaller, proportionally identical fixture keeps accounting tests fast.
 const config: CityConfig = {
@@ -106,8 +109,13 @@ test("white/blue automation pay the correct provider exactly and persist into su
   );
   assert.equal(
     whiteOnly.years[1].aiAutomationRevenue,
-    whiteOnly.years[0].aiAutomationRevenue,
+    whiteOnly.years[1].companies.reduce((sum, c) => sum + c.automated.white * config.policy.automationFee.white, 0),
   );
+  for (const c of whiteOnly.years[1].companies) {
+    const prior = whiteOnly.years[0].companies[c.id];
+    if (!c.closed) assert.equal(c.automated.white, prior.automated.white);
+    else assert.equal(c.automated.white, 0);
+  }
   assert.ok(whiteOnly.years[0].aiRevenue > noLayoffs.years[0].aiRevenue);
   assert.ok(
     blueOnly.years[0].roboticsRevenue > noLayoffs.years[0].roboticsRevenue,
@@ -177,4 +185,113 @@ test("reject invalid configuration, unknown suppliers, and invalid annual rates"
     }),
   );
   assert.throws(() => simulate(config, zero.slice(1)));
+});
+
+test("shareholder qualification is strict, rounded to people, persistent and includes providers", () => {
+  const city = CityFactory.create({ ...config, population: 200_000 });
+  const h = householdAccounts(city.config, city.citizens);
+  productionAccounts(city, h.spending, -1, true);
+  assignShareholders(city);
+  for (const c of city.companies) if (c.shareholderCount) {
+    assert.ok(c.workers.white + c.workers.blue > 50);
+    assert.equal(c.shareholderCount, Math.round((c.workers.white + c.workers.blue) * 0.01));
+  }
+  assert.ok(city.companies.filter((c) => c.provider).every((c) => c.shareholderCount > 0));
+  const owners = Array.from(city.citizens.ownerCompany);
+  const labor = transitionLabor(city, { year: 2026, white: 1, blue: 1 }, 0);
+  assert.equal(labor.layoffs.white, labor.eligible.white);
+  assert.equal(labor.layoffs.blue, labor.eligible.blue);
+  owners.forEach((id, i) => {
+    if (id >= 0) assert.equal(city.citizens.employer[i], id);
+  });
+  const existing = city.companies.map((c) => c.shareholderCount);
+  assignShareholders(city);
+  assert.deepEqual(city.companies.map((c) => c.shareholderCount), existing);
+});
+
+test("shareholder consumption is capped, while unspent dividends accumulate and transfers balance", () => {
+  const city = CityFactory.create(config);
+  const p = city.citizens, c = city.companies[p.employer[0]];
+  p.ownerCompany[0] = c.id;
+  c.shareholderCount = 1;
+  c.shareholders[p.role[0] === 1 ? "white" : "blue"] = 1;
+  c.retainedCapital = 10_000_000;
+  c.dividend = 10_000_000;
+  payDividends(city);
+  assert.equal(p.dividends[0], 10_000_000);
+  assert.equal(c.retainedCapital, 0);
+  const h = householdAccounts(config, p);
+  assert.equal(h.budgets[0], 500_000);
+  const spending = settleHouseholds(p, h, h.spending);
+  assert.ok(Math.abs(spending - 500_000) < 1e-6);
+  assert.ok(Math.abs(p.wealth[0] - (h.incomes[0] - 500_000)) < 1e-6);
+  assert.ok(p.wealth[0] > 9_500_000);
+  payDividends(city);
+  assert.equal(p.dividends[0], 0, "dividends cannot be paid twice");
+  const next = householdAccounts(config, p);
+  assert.ok(next.budgets[0] <= 500_000);
+});
+
+test("demand closures remove small firms first, release employees and cancel supplier contracts", () => {
+  const city = CityFactory.create({ ...config, policy: { ...config.policy, matchingRate: 0 } });
+  const h = householdAccounts(city.config, city.citizens);
+  productionAccounts(city, h.spending, -1, true);
+  const retail = city.companies.filter((c) => c.sector === "retail");
+  for (const c of retail) {
+    const size = c.initialWorkers.white + c.initialWorkers.blue;
+    c.initialRevenue = size * 100_000;
+    c.previousRevenue = c.initialRevenue;
+    c.revenue = c.initialRevenue * 0.1;
+    c.profit = -100_000;
+  }
+  const labor = transitionLabor(city, { year: 2027, white: 0, blue: 0 }, 1);
+  const closed = retail.filter((c) => c.closed), active = retail.filter((c) => !c.closed);
+  assert.ok(closed.length > 0 && active.length > 0);
+  const size = (c: typeof retail[number]) => c.initialWorkers.white + c.initialWorkers.blue;
+  assert.ok(Math.max(...closed.map(size)) <= Math.min(...active.map(size)));
+  assert.equal(labor.closureLayoffs, closed.reduce((sum, c) => sum + size(c), 0));
+  for (const c of closed) {
+    assert.equal(c.workers.white + c.workers.blue, 0);
+    assert.equal(c.vacancies.white + c.vacancies.blue, 0);
+    assert.equal(c.automated.white + c.automated.blue, 0);
+  }
+  const after = householdAccounts(city.config, city.citizens);
+  assert.ok(after.spending.clothes < h.spending.clothes);
+  const production = productionAccounts(city, after.spending, 1);
+  assert.ok(Math.abs(production.gdp - city.companies.reduce((sum, c) => sum + c.revenue - c.intermediateCosts - c.automationCosts, 0)) < 0.01);
+  for (const c of closed) assert.equal(c.revenue + c.automationCosts + c.payroll, 0);
+  transitionLabor(city, { year: 2028, white: 0, blue: 0 }, 2);
+  for (const c of closed) assert.equal(c.workers.white + c.workers.blue, 0);
+});
+
+test("wealth metrics are bounded and a demand shock produces secondary layoffs and blocked investment", () => {
+  for (const y of shock.years) {
+    assert.ok(y.wealthGini >= 0 && y.wealthGini <= 1);
+    assert.ok(y.topOnePercentWealthShare >= 0 && y.topOnePercentWealthShare <= 1);
+    assert.ok(y.shareholderWealthShare >= 0 && y.shareholderWealthShare <= 1);
+    assert.ok(y.idleCapital >= 0 && Number.isFinite(y.idleCapital));
+    assert.ok(y.shareholderConsumption <= y.shareholders * 500_000 + 0.01);
+    assert.deepEqual(y.lorenz[0], { population: 0, wealth: 0 });
+    assert.ok(Math.abs(y.lorenz.at(-1)!.wealth - 1) < 1e-9);
+    for (let i = 1; i < y.lorenz.length; i++) assert.ok(y.lorenz[i].wealth >= y.lorenz[i - 1].wealth);
+    assert.ok(y.closureLayoffs <= y.demandLayoffs);
+    for (const c of y.companies) {
+      assert.ok(c.workers.white >= c.shareholders.white);
+      assert.ok(c.workers.blue >= c.shareholders.blue);
+    }
+  }
+  assert.ok(shock.years.at(-1)!.closedCompanies > noLayoffs.years.at(-1)!.closedCompanies);
+  assert.ok(shock.years.slice(1).some((y) => y.closureLayoffs > 0 && y.demandBlockedInvestment > 0));
+  assert.ok(shock.years.at(-1)!.idleCapital > shock.years[0].idleCapital);
+});
+
+test("zero incomes and benefits leave no wealth, NaNs or unfunded investment", () => {
+  const c = { ...config, sectors: config.sectors.map((s) => ({ ...s, wages: { white: 0, blue: 0 } })), policy: { ...config.policy, annualBenefit: 0, governmentPerResident: 0, automationFee: { white: 0, blue: 0 }, baseServiceFee: { white: 0, blue: 0 } } };
+  const r = simulate(c, zero);
+  for (const y of r.years) {
+    assert.equal(y.investment, 0);
+    assert.equal(y.idleCapital, 0);
+    assert.equal(y.wealthGini, 0);
+    assert.equal(y.householdWealth, 0);
+  }
 });

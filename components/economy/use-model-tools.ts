@@ -59,6 +59,12 @@ export function useModelTools(
             benefitCost: y.benefitCost,
             aiRevenue: y.aiRevenue,
             roboticsRevenue: y.roboticsRevenue,
+            wealthGini: y.wealthGini,
+            topOnePercentWealthShare: y.topOnePercentWealthShare,
+            idleCapital: y.idleCapital,
+            demandBlockedInvestment: y.demandBlockedInvestment,
+            closedCompanies: y.closedCompanies,
+            closureLayoffs: y.closureLayoffs,
           })) ?? [],
       }),
     });

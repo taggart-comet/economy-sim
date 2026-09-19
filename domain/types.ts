@@ -58,6 +58,13 @@ export interface Company {
   name: string;
   sector: string;
   provider?: Role;
+  closed: boolean;
+  shareholders: Pair;
+  shareholderCount: number;
+  retainedCapital: number;
+  operatingDebt: number;
+  investedCapital: number;
+  dividend: number;
   workers: Pair;
   initialWorkers: Pair;
   vacancies: Pair;
@@ -79,6 +86,10 @@ export interface CitizenPopulation {
   employer: Int32Array; // -1 = unemployed / outside labor force
   lastEmployer: Int32Array;
   salary: Float64Array;
+  ownerCompany: Int32Array; // Persistent ownership; -1 for non-shareholders
+  dividends: Float64Array;
+  wealth: Float64Array; // Liquid savings accumulated since simulation start
+  investedWealth: Float64Array;
   incomeFactor: Float32Array; // Stable, seeded wage heterogeneity.
   unemployedYears: Uint8Array;
   spendingProfile: Uint8Array; // 0 = dependent; 1 = employed white; 2 = employed blue; 3 = unemployed
@@ -89,6 +100,9 @@ export interface Citizen {
   employerId: number | null;
   lastEmployerId: number | null;
   annualSalary: number;
+  shareholderOf: number | null;
+  wealth: number;
+  dividend: number;
   unemployedYears: number;
   spendingProfile: number;
 }
@@ -108,6 +122,7 @@ export interface SectorResult {
   id: string;
   name: string;
   companies: number;
+  closedCompanies: number;
   workers: Pair;
   vacancies: number;
   revenue: number;
@@ -124,6 +139,19 @@ export interface YearResult {
   eligible: Pair;
   layoffs: Pair;
   demandLayoffs: number;
+  closureLayoffs: number;
+  newClosures: number;
+  closedCompanies: number;
+  shareholders: number;
+  dividends: number;
+  shareholderConsumption: number;
+  wealthGini: number;
+  topOnePercentWealthShare: number;
+  shareholderWealthShare: number;
+  householdWealth: number;
+  idleCapital: number;
+  demandBlockedInvestment: number;
+  lorenz: { population: number; wealth: number }[];
   hires: Pair;
   vacancies: number;
   spending: Spending;

@@ -16,6 +16,13 @@ export class CompanyFactory {
         : `${sector.name} ${String(sizeIndex + 1).padStart(4, "0")}`,
       sector: sector.id,
       provider: sector.provider,
+      closed: false,
+      shareholders: { white: 0, blue: 0 },
+      shareholderCount: 0,
+      retainedCapital: 0,
+      operatingDebt: 0,
+      investedCapital: 0,
+      dividend: 0,
       workers: { ...workers },
       initialWorkers: { ...workers },
       vacancies: {

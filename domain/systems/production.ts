@@ -7,6 +7,7 @@ export function productionAccounts(
   spending: Spending,
   yearIndex: number,
   initialize = false,
+  availableCapital = Infinity,
 ) {
   const { config, companies: cs } = city,
     ss = config.sectors,
@@ -17,7 +18,13 @@ export function productionAccounts(
       final[id] += spending[category] * share;
   const consumptionTotal = Object.values(spending).reduce((a, b) => a + b, 0);
   const plannedGovernment = config.population * policy.governmentPerResident;
-  const plannedInvestment = consumptionTotal * policy.investmentShare;
+  const initialConsumption = Object.values(city.initialSpending).reduce((a, b) => a + b, 0);
+  const demandRatio = initialConsumption > 0 ? Math.min(1, consumptionTotal / initialConsumption) : 0;
+  const normalOpportunity = initialConsumption * policy.investmentShare;
+  const investmentOpportunity = consumptionTotal * policy.investmentShare * demandRatio;
+  const plannedInvestment = Math.min(availableCapital, investmentOpportunity);
+  const demandBlockedInvestment = initialize ? 0 : Math.max(0,
+    Math.min(availableCapital, normalOpportunity) - plannedInvestment);
   // Government purchases are distinct from benefits and support the city's education/health services.
   const government = Object.fromEntries(
     Object.entries(config.governmentLinks).map(([id, share]) => [
@@ -46,6 +53,7 @@ export function productionAccounts(
   );
   const capacities = Object.fromEntries(ss.map((s) => [s.id, 0]));
   for (const c of cs) {
+    if (c.closed) continue;
     const initial = c.initialWorkers.white + c.initialWorkers.blue;
     const equivalent =
       c.workers.white +
@@ -98,6 +106,25 @@ export function productionAccounts(
     if (residual < 0.0001) break;
     if (iteration === 999) throw new Error("Supplier network did not converge");
   }
+  // Larger survivors gain market share when final demand contracts. Closed firms receive none.
+  const companyWeights = cs.map((c) => {
+    if (c.closed) return 0;
+    const initialSize = c.initialWorkers.white + c.initialWorkers.blue;
+    const pressure = initialize || !city.initialFinalDemand[c.sector] ? 0 :
+      Math.max(0, 1 - final[c.sector] / city.initialFinalDemand[c.sector]);
+    const effective = c.workers.white + c.workers.blue +
+      c.automated.white * policy.automationEfficiency.white +
+      c.automated.blue * policy.automationEfficiency.blue;
+    return (initialize ? initialSize : effective) * Math.pow(Math.max(1, initialSize), pressure * 2);
+  });
+  const weightTotals = Object.fromEntries(ss.map((s) => [s.id, 0]));
+  cs.forEach((c) => { weightTotals[c.sector] += companyWeights[c.id]; });
+  // An automated firm can have no human employees; if all capacity is gone,
+  // leave one surviving supplier's intermediate receipts explicit rather than losing money.
+  for (const s of ss) if (!weightTotals[s.id]) {
+    const survivor = cs.find((c) => c.sector === s.id && !c.closed);
+    if (survivor) { companyWeights[survivor.id] = 1; weightTotals[s.id] = 1; }
+  }
   const automationRevenue = { white: 0, blue: 0 };
   const baseServiceRevenue = { white: 0, blue: 0 };
   for (const c of cs) {
@@ -105,7 +132,7 @@ export function productionAccounts(
       automationRevenue[r] += c.automated[r] * policy.automationFee[r];
   }
   for (const c of cs)
-    if (!c.provider)
+    if (!c.provider && !c.closed)
       for (const r of ["white", "blue"] as const)
         baseServiceRevenue[r] += c.initialWorkers[r] * policy.baseServiceFee[r];
   // Wages use individual earnings (fixed skill/experience factor) rather than a headcount proxy.
@@ -115,9 +142,7 @@ export function productionAccounts(
     if (p.employer[i] >= 0) cs[p.employer[i]].payroll += p.salary[i];
   for (const c of cs) {
     c.previousRevenue = c.revenue;
-    const weight =
-      (c.initialWorkers.white + c.initialWorkers.blue) /
-      Math.max(1, baseWeights[c.sector]);
+    const weight = companyWeights[c.id] / Math.max(1, weightTotals[c.sector]);
     c.revenue =
       gross[c.sector] * weight +
       (c.provider
@@ -127,7 +152,7 @@ export function productionAccounts(
     c.automationCosts =
       c.automated.white * policy.automationFee.white +
       c.automated.blue * policy.automationFee.blue +
-      (c.provider
+      (c.provider || c.closed
         ? 0
         : c.initialWorkers.white * policy.baseServiceFee.white +
           c.initialWorkers.blue * policy.baseServiceFee.blue);
@@ -146,5 +171,6 @@ export function productionAccounts(
     governmentPurchases,
     investment: realizedInvestment,
     automationRevenue,
+    demandBlockedInvestment,
   };
 }

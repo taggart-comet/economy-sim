@@ -1187,3 +1187,15 @@ button:hover {
   .provider-money { grid-column:2; margin-left:0; text-align:left; }
   .household-intro { grid-template-columns:1fr; }
 }
+
+.wealth-demand { display: grid; gap: 20px; }
+.wealth-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.wealth-charts > section { min-width: 0; }
+.wealth-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; padding: 24px 0; }
+.wealth-metrics > div { display: flex; flex-direction: column; gap: 7px; }
+.wealth-metrics span { font-size: 12px; color: #778297; }
+.wealth-metrics strong { font-size: 26px; font-weight: 600; letter-spacing: -1px; color: #22334a; }
+.wealth-metrics small { font-size: 11px; line-height: 1.5; color: #778297; }
+.wealth-note { max-width: 1000px; line-height: 1.7; }
+@media (max-width: 1100px) { .wealth-charts { grid-template-columns: 1fr; } .wealth-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .wealth-metrics strong { font-size: 23px; } }

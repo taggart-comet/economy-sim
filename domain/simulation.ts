@@ -7,7 +7,8 @@ import type {
 } from "./types";
 import { CityFactory } from "./factories/city-factory";
 import { CitizenFactory } from "./factories/citizen-factory";
-import { householdAccounts } from "./systems/households";
+import { assignShareholders, wealthAccounts } from "./systems/ownership";
+import { householdAccounts, settleHouseholds } from "./systems/households";
 import { transitionLabor } from "./systems/labor";
 import { productionAccounts } from "./systems/production";
 import { validateScenario } from "./validation";
@@ -16,6 +17,8 @@ const emptyLabor = () => ({
   layoffs: { white: 0, blue: 0 },
   hires: { white: 0, blue: 0 },
   demandLayoffs: 0,
+  closureLayoffs: 0,
+  newClosures: 0,
 });
 function snapshot(
   city: City,
@@ -25,9 +28,41 @@ function snapshot(
   balance: number,
   initialize = false,
 ): YearResult {
-  const h = householdAccounts(city.config, city.citizens),
-    production = productionAccounts(city, h.spending, index, initialize),
-    cs = city.companies;
+  const h = householdAccounts(city.config, city.citizens), cs = city.companies;
+  const planned = Object.values(h.spending).reduce((a, b) => a + b, 0);
+  const available = Math.max(0, h.liquidWealth + h.disposableIncome - planned +
+    cs.reduce((sum, c) => sum + c.retainedCapital, 0));
+  const production = productionAccounts(city, h.spending, index, initialize, available);
+  let shareholderConsumption = 0;
+  if (initialize) assignShareholders(city);
+  else {
+    shareholderConsumption = settleHouseholds(city.citizens, h, production.spending);
+    // Investment exchanges cash for productive assets. It never destroys household wealth.
+    const p = city.citizens;
+    const householdCash = p.wealth.subarray(0, p.laborForce).reduce((sum, v) => sum + v, 0);
+    const companyCash = cs.reduce((sum, c) => sum + c.retainedCapital, 0);
+    // Households finance first; firms contribute only their remaining cash.
+    const householdRate = householdCash > 0 ? Math.min(1, production.investment / householdCash) : 0;
+    for (let i = 0; i < p.laborForce; i++) {
+      const invested = p.wealth[i] * householdRate;
+      p.wealth[i] -= invested;
+      p.investedWealth[i] += invested;
+    }
+    const companyRate = companyCash > 0 ? Math.min(1, Math.max(0, production.investment - householdCash) / companyCash) : 0;
+    for (const c of cs) {
+      const invested = c.retainedCapital * companyRate;
+      c.retainedCapital -= invested;
+      c.investedCapital += invested;
+      const cash = c.retainedCapital + c.profit - Math.max(0, c.profit) * city.config.policy.profitTax;
+      if (cash < 0) { c.operatingDebt -= cash; c.retainedCapital = 0; }
+      else {
+        const repayment = Math.min(c.operatingDebt, cash);
+        c.operatingDebt -= repayment;
+        c.retainedCapital = cash - repayment;
+      }
+      c.dividend = c.shareholderCount ? Math.min(c.retainedCapital, Math.max(0, c.profit) * (1 - city.config.policy.profitTax)) : 0;
+    }
+  }
   const taxRevenue =
     h.wageIncome * city.config.policy.incomeTax +
     cs.reduce(
@@ -41,7 +76,8 @@ function snapshot(
     return {
       id: s.id,
       name: s.name,
-      companies: companies.length,
+      companies: companies.filter((c) => !c.closed).length,
+      closedCompanies: companies.filter((c) => c.closed).length,
       workers: {
         white: companies.reduce((n, c) => n + c.workers.white, 0),
         blue: companies.reduce((n, c) => n + c.workers.blue, 0),
@@ -63,6 +99,9 @@ function snapshot(
     year,
     ...labor,
     ...production,
+    ...wealthAccounts(city),
+    shareholderConsumption,
+    closedCompanies: cs.filter((c) => c.closed).length,
     unemploymentRate: h.unemployed / city.citizens.laborForce,
     unemployed: h.unemployed,
     employed: {
@@ -82,6 +121,7 @@ function snapshot(
     companies: cs.map((c) => ({
       ...c,
       workers: { ...c.workers },
+      shareholders: { ...c.shareholders },
       vacancies: { ...c.vacancies },
       automated: { ...c.automated },
     })),
