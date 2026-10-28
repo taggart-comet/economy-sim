@@ -21,7 +21,7 @@ export function Forecast({
   year: number;
 }) {
   const data = [result.initial, ...result.years].map((r, i) => ({
-    year: i === 0 ? "Jan 2026" : String(r.year),
+    year: i === 0 ? `Jan ${result.initial.year + 1}` : String(r.year),
     gdp: r.gdp / 1e9,
     unemployment: r.unemploymentRate * 100,
     baseline: (i === 0 ? baseline?.initial : baseline?.years[i - 1])?.gdp
@@ -32,7 +32,7 @@ export function Forecast({
     <div
       className="chart-wrap"
       role="img"
-      aria-label="GDP in billions of US dollars and unemployment rate from January 2026 through 2030. Exact values are in the annual results table below."
+      aria-label={`GDP in billions of US dollars and unemployment rate from January ${result.initial.year + 1} through ${result.years.at(-1)?.year}. Exact values are in the annual results table below.`}
     >
       <ResponsiveContainer width="100%" height={285}>
         <ComposedChart
@@ -90,7 +90,7 @@ export function Forecast({
               name,
             ]}
             labelFormatter={(label) =>
-              label === "Jan 2026" ? "Starting city" : `${label} · year end`
+              label === `Jan ${result.initial.year + 1}` ? "Starting city" : `${label} · year end`
             }
           />
           <ReferenceLine

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import SimulationWorker from "../../domain/simulation.worker?worker";
 import type { CityConfig, SimulationResult, YearPolicy } from "@/domain/types";
 export function useSimulation(
   config: CityConfig,
@@ -17,7 +18,7 @@ export function useSimulation(
     let worker: Worker | undefined;
     const timer = setTimeout(() => {
       try {
-        worker = new Worker("/model.worker.js", { type: "module" });
+        worker = new SimulationWorker();
         worker.onmessage = (event) => {
           if (requestId !== sequence.current) return;
           if (event.data.error) setError(event.data.error);

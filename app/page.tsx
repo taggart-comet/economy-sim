@@ -20,6 +20,15 @@ import { NamedSlider as Slider } from "@/components/economy/named-slider";
 import { useModelTools } from "@/components/economy/use-model-tools";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Table,
   TableHeader,
   TableBody,
@@ -28,10 +37,15 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { DEFAULT_CONFIG, DEFAULT_SCENARIO, SOURCES } from "@/domain/config";
+import { createLayoffPreset, resizeScenario, SCENARIO_DURATIONS } from "@/domain/scenario";
 import type { CityConfig, Role, YearPolicy, YearResult } from "@/domain/types";
 import { CATEGORIES, consumptionProfile } from "@/domain/systems/households";
 import { WealthDemand } from "@/components/economy/wealth-demand";
+import { LayoffPresets } from "@/components/economy/layoff-presets";
 import { Forecast } from "@/components/economy/forecast";
+import { BudgetForecast } from "@/components/economy/budget-forecast";
+import { AgeDistribution } from "@/components/economy/age-distribution";
+import { IndustryRipple } from "@/components/economy/industry-ripple";
 import { useSimulation } from "@/components/economy/use-simulation";
 const number = (n: number) => Math.round(n).toLocaleString("en-US");
 const money = (n: number) =>
@@ -57,13 +71,18 @@ export default function Home() {
   const [config, setConfig] = useState<CityConfig>(DEFAULT_CONFIG),
     [scenario, setScenario] = useState<YearPolicy[]>(DEFAULT_SCENARIO),
     [selected, setSelected] = useState(0),
+    [presetOpen, setPresetOpen] = useState(false),
     [sector, setSector] = useState<string | null>(null);
   const zeroScenario = useMemo(
-    () => scenario.map((p) => ({ ...p, white: 0, blue: 0 })),
+    () => resizeScenario([], config.startYear, config.years),
     [config],
-  ); // Always the same horizon; does not re-run when only layoffs change.
-  const { result, pending, error } = useSimulation(config, scenario),
-    { result: baseline } = useSimulation(config, zeroScenario, true);
+  ); // Recalculate the baseline only when model settings or duration change.
+  const { result: latestResult, pending, error } = useSimulation(config, scenario),
+    { result: latestBaseline } = useSimulation(config, zeroScenario, true);
+  const matchesHorizon = (value: typeof latestResult) =>
+    value?.years.length === config.years && value.years[0]?.year === config.startYear;
+  const result = matchesHorizon(latestResult) ? latestResult : null;
+  const baseline = matchesHorizon(latestBaseline) ? latestBaseline : null;
   useModelTools(scenario, result, pending, setScenario);
   const year = scenario[selected],
     r = result?.years[selected],
@@ -79,13 +98,20 @@ export default function Home() {
       ...current,
       policy: { ...current.policy, [key]: value },
     }));
+  const changeDuration = (value: string) => {
+    const years = Number(value);
+    setScenario((current) => resizeScenario([...current, ...createLayoffPreset("normal", config.startYear, years)], config.startYear, years));
+    setConfig((current) => ({ ...current, years }));
+    setSelected((current) => Math.min(current, years - 1));
+  };
   const reset = () => {
-    setScenario(DEFAULT_SCENARIO.map((p) => ({ ...p, white: 0, blue: 0 })));
-    setConfig(DEFAULT_CONFIG);
+    setScenario(resizeScenario([], DEFAULT_CONFIG.startYear, config.years));
+    setConfig({ ...DEFAULT_CONFIG, years: config.years });
     setSelected(0);
   };
   return (
     <div className="app-shell">
+      {presetOpen && <LayoffPresets scenario={scenario} onApply={setScenario} onClose={() => setPresetOpen(false)} />}
       <header className="topbar">
         <a className="brand" href="/">
           <span className="brand-icon">
@@ -111,9 +137,6 @@ export default function Home() {
               economy.
             </p>
           </div>
-          <button className="button" onClick={reset}>
-            <RotateCcw size={15} /> Reset to no layoffs
-          </button>
         </div>
         <div className="city-strip">
           <span>
@@ -122,7 +145,7 @@ export default function Home() {
           </span>
           <span>
             <BriefcaseBusiness size={16} />
-            <strong>{number(result?.laborForce ?? 499200)}</strong> labor force
+            <strong>{number(result?.laborForce ?? 499200)}</strong> initial labor force
           </span>
           <span>
             <Building2 size={16} />
@@ -136,8 +159,37 @@ export default function Home() {
         <div className="workspace">
           <aside className="panel controls">
             <div className="panel-title">
-              <h2>Your scenario</h2>
-              <SlidersHorizontal size={17} color="#8793a5" />
+              <h2>{config.years}-year scenario</h2>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="scenario-menu-trigger"
+                    aria-label="Scenario options"
+                  >
+                    <SlidersHorizontal size={17} aria-hidden="true" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="scenario-menu" onCloseAutoFocus={(event) => { if (presetOpen) event.preventDefault(); }}>
+                  <DropdownMenuRadioGroup value={String(config.years)} onValueChange={changeDuration}>
+                    {SCENARIO_DURATIONS.map((years) => (
+                      <DropdownMenuRadioItem key={years} value={String(years)}>
+                        {years}-year scenario
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setPresetOpen(true)}>
+                    <SlidersHorizontal size={15} aria-hidden="true" />
+                    Select Layoff Preset
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={reset}>
+                    <RotateCcw size={15} aria-hidden="true" />
+                    Reset to no layoffs
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <p>Choose a year. Adjust the disruption.</p>
             <div className="year-buttons" aria-label="Simulation year">
@@ -150,6 +202,7 @@ export default function Home() {
                 >
                   {p.year}
                   <span
+                    title={p.white + p.blue > 0 ? "Layoffs configured" : "No layoffs"}
                     className={
                       p.white + p.blue > 0 ? "year-mark active" : "year-mark"
                     }
@@ -258,18 +311,19 @@ export default function Home() {
                 }}
               />
               <div className="control-label">
-                Vacancy matching{" "}
+                Matching in a balanced market{" "}
                 <strong>{Math.round(config.policy.matchingRate * 100)}%</strong>
               </div>
               <Slider
-                aria-label="Vacancy matching rate"
+                aria-label="Matching rate in a balanced labor market"
                 value={[config.policy.matchingRate * 100]}
                 onValueChange={(v) => policy("matchingRate", v[0] / 100)}
                 max={100}
               />
               <p className="control-help">
-                Share of open, demand-supported roles filled each year. Skills
-                stay within the same job type.
+                Annual share matched when job seekers and openings are equal.
+                More candidates per opening make vacancies easier to fill;
+                more openings per candidate make jobs easier to find.
               </p>
             </details>
             <div className="callout">
@@ -361,112 +415,85 @@ export default function Home() {
                 <Tabs defaultValue="overview" className="result-tabs">
                   <TabsList variant="line" className="view-tabs">
                     <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="gdp">GDP</TabsTrigger>
                     <TabsTrigger value="wealth">Wealth & demand</TabsTrigger>
                     <TabsTrigger value="companies">Companies</TabsTrigger>
                     <TabsTrigger value="households">Households</TabsTrigger>
+                    <TabsTrigger value="demographics">Demographics</TabsTrigger>
                     <TabsTrigger value="model">Model & sources</TabsTrigger>
                   </TabsList>
                   <TabsContent value="overview">
                     <section className="panel forecast">
                       <div className="panel-title">
                         <div>
-                          <h2>The five-year outlook</h2>
-                          <p>Annual GDP and unemployment · 2026–2030</p>
+                          <h2>The {config.years}-year outlook</h2>
+                          <p>Annual results · {config.startYear}–{config.startYear + config.years - 1}</p>
                         </div>
-                        <span className="forecast-badge">5-year forecast</span>
+                        <span className="forecast-badge">{config.years}-year forecast</span>
                       </div>
                       <div className="chart-legend">
-                        <span>
-                          <i className="legend-line gdp" />
-                          City GDP
-                        </span>
-                        <span>
-                          <i className="legend-line unemployment" />
-                          Unemployment
-                        </span>
-                        <span>
-                          <i className="legend-line baseline" />
-                          GDP without layoffs
-                        </span>
+                        <span><i className="legend-line gdp" />Budget balance (% of GDP)</span>
+                        <span><i className="legend-line unemployment" />Unemployment</span>
+                        <span><i className="legend-line baseline" />Balance without layoffs</span>
                       </div>
-                      <Forecast
-                        result={result}
-                        baseline={baseline}
-                        year={year.year}
-                      />
+                      <BudgetForecast result={result} baseline={baseline} year={year.year} />
+                      <div className="budget-explanation">
+                        <p><strong>Can taxes cover public commitments?</strong> Budget balance is tax revenue
+                          (including pension contributions) minus public-service purchases, pensions, and
+                          unemployment benefits, divided by GDP. Above zero is a surplus; below zero is a
+                          deficit that needs financing from borrowing, reserves, or outside support.</p>
+                        <p><strong>Historical comparisons:</strong> Greece’s deficit reached <strong>15.4% of GDP
+                          in 2009</strong> before it lost sustainable market financing and entered its first
+                          bailout in 2010. Portugal’s deficit reached <strong>11.4% in 2010</strong>; it
+                          requested a bailout in 2011 when refinancing became unaffordable. <a
+                            href="https://www.esm.europa.eu/assistance/greece/explainer-esm-and-efsf-financial-assistance-greece"
+                            target="_blank" rel="noreferrer">Greece: ESM</a> · <a
+                            href="https://www.esm.europa.eu/assistance/portugal"
+                            target="_blank" rel="noreferrer">Portugal: ESM</a> · <a
+                            href="https://www.imf.org/external/datamapper/GGXCNL_NGDP@WEO/GRC/PRT"
+                            target="_blank" rel="noreferrer">Historical balances: IMF</a></p>
+                        <p>These are historical comparisons, not bailout thresholds. The simulated balance
+                          excludes debt interest, unlike the historical overall balances. Borrowing limits
+                          are not modeled, so benefits, pensions, and public services continue to be paid
+                          even when the budget is in deficit.</p>
+                      </div>
                       <div className="chart-footer">
                         <Info size={14} />
-                        The first point is the starting city. Forecast points
-                        show full-year activity after hiring.
+                        The first point is the starting city’s annual accounts. Forecast points show full-year
+                        balances after hiring.
                       </div>
                     </section>
                     <div className="lower-grid">
-                      <section className="panel providers">
-                        <div className="panel-title">
-                          <h2>Where the revenue goes</h2>
-                          <span className="tiny-label">{year.year}</span>
-                        </div>
-                        <p>Annual revenue at the city’s automation providers</p>
-                        <Provider
-                          name="Civic AI"
-                          subtitle="White-collar automation"
-                          revenue={r.aiRevenue}
-                          fees={r.aiAutomationRevenue}
-                          icon={<Cpu size={20} />}
-                          type="ai"
-                        />
-                        <Provider
-                          name="Atlas Robotics"
-                          subtitle="Blue-collar automation"
-                          revenue={r.roboticsRevenue}
-                          fees={r.roboticsAutomationRevenue}
-                          icon={<Bot size={20} />}
-                          type="robot"
-                        />
-                        <div className="provider-note">
-                          Fees are paid by local companies, so they are not
-                          counted twice in GDP.
-                        </div>
-                      </section>
-                      <section className="panel labor-panel">
-                        <div className="panel-title">
-                          <h2>The employment ripple</h2>
-                          <span className="tiny-label">{year.year}</span>
-                        </div>
-                        <p>Jobs lost, people rehired, and the remaining gap</p>
-                        <div className="flow-row">
-                          <span>
-                            <i className="flow-dot loss" />
-                            Automation layoffs
-                          </span>
-                          <strong>
-                            −{number(r.layoffs.white + r.layoffs.blue)}
-                          </strong>
-                        </div>
-                        <div className="flow-row">
-                          <span>
-                            <i className="flow-dot demand" />
-                            Lower-demand layoffs
-                          </span>
-                          <strong>−{number(r.demandLayoffs)}</strong>
-                        </div>
-                        <div className="flow-row">
-                          <span>
-                            <i className="flow-dot hires" />
-                            Hired into vacancies
-                          </span>
-                          <strong className="positive">
-                            +{number(r.hires.white + r.hires.blue)}
-                          </strong>
-                        </div>
-                        <div className="flow-row flow-total">
-                          <span>Unfilled positions</span>
-                          <strong>{number(r.vacancies)}</strong>
-                        </div>
-                        <div className="labor-footnote">
-                          {number(r.newClosures)} firms closed this year; {number(r.closureLayoffs)} of the demand layoffs came from closures.
-                        </div>
-                      </section>
+                      <IndustryRipple current={r} previous={selected === 0 ? result.initial : result.years[selected - 1]} />
+                      <div className="revenue-sidebar">
+                        <section className="panel providers">
+                          <div className="panel-title">
+                            <h2>Where the revenue goes</h2>
+                            <span className="tiny-label">{year.year}</span>
+                          </div>
+                          <p>Annual revenue at the city’s automation providers</p>
+                          <Provider
+                            name="Civic AI"
+                            subtitle="White-collar automation"
+                            revenue={r.aiRevenue}
+                            fees={r.aiAutomationRevenue}
+                            icon={<Cpu size={20} />}
+                            type="ai"
+                          />
+                          <Provider
+                            name="Atlas Robotics"
+                            subtitle="Blue-collar automation"
+                            revenue={r.roboticsRevenue}
+                            fees={r.roboticsAutomationRevenue}
+                            icon={<Bot size={20} />}
+                            type="robot"
+                          />
+                          <div className="provider-note">
+                            Fees are paid by local companies, so they are not
+                            counted twice in GDP.
+                          </div>
+                        </section>
+                      </div>
                     </div>
                     <section className="panel annual-panel">
                       <div className="panel-title">
@@ -480,7 +507,10 @@ export default function Home() {
                             <TableHead>GDP</TableHead>
                             <TableHead>Unemployment</TableHead>
                             <TableHead>Benefits</TableHead>
+                            <TableHead>Pensions</TableHead>
+                            <TableHead>Pension contributions</TableHead>
                             <TableHead>City budget balance</TableHead>
+                            <TableHead>Balance / GDP</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -507,6 +537,8 @@ export default function Home() {
                                 {percent(v.unemploymentRate)}
                               </TableCell>
                               <TableCell>{compact(v.benefitCost)}</TableCell>
+                              <TableCell>{compact(v.pensionCost)}</TableCell>
+                              <TableCell>{compact(v.pensionContributions)}</TableCell>
                               <TableCell
                                 className={
                                   v.budgetBalance < 0 ? "negative" : "positive"
@@ -514,19 +546,75 @@ export default function Home() {
                               >
                                 {compact(v.budgetBalance)}
                               </TableCell>
+                              <TableCell className={v.budgetBalance < 0 ? "negative" : "positive"}>
+                                {v.gdp > 0 ? percent(v.budgetBalance / v.gdp) : "—"}
+                              </TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
                       </Table>
                       <div className="table-footnote">
-                        Budget balance = taxes − benefits − government
-                        purchases. Debt carries forward; benefits are transfers,
-                        not a direct GDP subtraction.
+                        Budget balance = taxes (including pension contributions)
+                        − unemployment benefits − pensions − government purchases.
+                        Debt carries forward; benefits and pensions are transfers.
+                      </div>
+                    </section>
+                  </TabsContent>
+                  <TabsContent value="gdp">
+                    <section className="panel forecast">
+                      <div className="panel-title">
+                        <div>
+                          <h2>The {config.years}-year outlook</h2>
+                          <p>Annual GDP and unemployment · {config.startYear}–{config.startYear + config.years - 1}</p>
+                        </div>
+                        <span className="forecast-badge">{config.years}-year forecast</span>
+                      </div>
+                      <div className="chart-legend">
+                        <span>
+                          <i className="legend-line gdp" />
+                          City GDP
+                        </span>
+                        <span>
+                          <i className="legend-line unemployment" />
+                          Unemployment
+                        </span>
+                        <span>
+                          <i className="legend-line baseline" />
+                          GDP without layoffs
+                        </span>
+                      </div>
+                      <Forecast
+                        result={result}
+                        baseline={baseline}
+                        year={year.year}
+                      />
+                      <div className="budget-explanation">
+                        <p><strong>Why doesn’t GDP collapse as unemployment rises?</strong> GDP measures
+                          production, not how many people have jobs or how securely they live. In this model,
+                          AI and robotics replace much of the productive capacity of displaced workers, so
+                          fewer employees can still produce goods and services.</p>
+                        <p><strong>Spending continues after jobs disappear.</strong> Unemployed residents
+                          receive {money(config.policy.annualBenefit)} a year in benefits and can draw on
+                          savings. Pensions, shareholder dividends, and continued government purchases also
+                          sustain demand. These cushions soften the fall in GDP even as wage income falls.</p>
+                        <p><strong>Budget balance is the more important health signal for public support
+                          in this scenario.</strong> The Overview chart shows whether tax revenue covers
+                          pensions, unemployment benefits, and public services. A growing deficit means
+                          keeping that support in place requires more financing. GDP holding up does not
+                          establish that those commitments are sustainable: this simulation keeps paying
+                          them without borrowing limits or debt interest. Budget balance reveals that
+                          pressure, though it is not a complete measure of economic health or a prediction
+                          of when funding runs out.</p>
+                      </div>
+                      <div className="chart-footer">
+                        <Info size={14} />
+                        The first point is the starting city. Forecast points
+                        show full-year activity after hiring.
                       </div>
                     </section>
                   </TabsContent>
                   <TabsContent value="wealth">
-                    <WealthDemand result={result} selected={r} />
+                    <WealthDemand config={config} result={result} selected={r} />
                   </TabsContent>
                   <TabsContent value="companies">
                     <section className="panel detail-panel">
@@ -581,8 +669,7 @@ export default function Home() {
                           company records
                         </h2>
                         <p>
-                          First 12 companies in this sector. Every company is
-                          simulated individually.
+                          First 12 companies in this sector. Funded orders set a staffing target; firms hire or reduce staff toward it.
                         </p>
                         <Table>
                           <TableHeader>
@@ -590,6 +677,8 @@ export default function Home() {
                               <TableHead>Company</TableHead>
                               <TableHead>Status / shareholders</TableHead>
                               <TableHead>Employees</TableHead>
+                              <TableHead>Staffing target</TableHead>
+                              <TableHead>Expected orders</TableHead>
                               <TableHead>Vacancies</TableHead>
                               <TableHead>Automated roles</TableHead>
                               <TableHead>Operating profit</TableHead>
@@ -606,6 +695,8 @@ export default function Home() {
                                   <TableCell>
                                     {number(c.workers.white + c.workers.blue)}
                                   </TableCell>
+                                  <TableCell>{number(c.desiredWorkers.white + c.desiredWorkers.blue)}</TableCell>
+                                  <TableCell>{money(c.expectedOrders)}</TableCell>
                                   <TableCell>
                                     {number(
                                       c.vacancies.white + c.vacancies.blue,
@@ -630,6 +721,9 @@ export default function Home() {
                   </TabsContent>
                   <TabsContent value="households">
                     <Households config={config} result={r} />
+                  </TabsContent>
+                  <TabsContent value="demographics">
+                    <AgeDistribution config={config} result={result} selected={r} />
                   </TabsContent>
                   <TabsContent value="model">
                     <Model config={config} result={r} />
@@ -769,8 +863,9 @@ function Households({
         </Table>
         <div className="table-footnote">
           Working households spend 86% (white-collar) or 94% (blue-collar) of
-          after-tax wages. Unemployed households spend their benefit,
-          prioritizing housing and groceries.
+          wages after income tax and employee pension contributions. Unemployed households spend their benefit,
+          prioritizing housing and groceries. The examples exclude savings drawdowns;
+          actual household budgets can also spend from liquid savings.
         </div>
       </section>
       <section className="panel detail-panel company-detail">
@@ -828,17 +923,17 @@ function Model({
             [
               "02",
               "Change employment",
-              "Apply layoffs to existing jobs, add provider vacancies, and match unemployed people into open roles of the same type.",
+              "Aging runs independently. After automation, funded purchasing power sets company staffing targets: hire into gaps, gradually reduce surplus staff, or close persistently loss-making firms when demand leaves excess capacity.",
             ],
             [
               "03",
               "Follow the money",
-              "Wages and benefits fund households. Purchases flow to sectors and local suppliers. Companies pay recurring automation fees.",
+              "Wages, benefits, pensions, and savings fund households. Ordinary productivity gains feed wages; workers and employers contribute to pensions. Purchases flow to sectors and local suppliers.",
             ],
             [
               "04",
               "Carry the effects forward",
-              "Falling demand shifts sales toward larger firms. Small firms with excess capacity close first, creating more layoffs next year. Profits fund shareholder dividends and accumulated wealth.",
+              "Hiring and layoffs change incomes and spending. The next annual staffing decision uses that purchasing power. Profits fund shareholder dividends and accumulated wealth.",
             ],
           ].map(([n, title, body]) => (
             <div key={n}>
@@ -862,6 +957,7 @@ function Model({
             <span>Adult labor participation</span>
             <strong>62.4%</strong>
           </div>
+          <div><span>Workforce entry / retirement age</span><strong>{config.workforceEntryAge} / {config.retirementAge}</strong></div>
           <div>
             <span>Starting unemployment</span>
             <strong>4.4%</strong>
@@ -872,7 +968,27 @@ function Model({
           </div>
           <div>
             <span>Real productivity growth</span>
-            <strong>1.5% / year</strong>
+            <strong>{percent(config.policy.productivityGrowth)} / year</strong>
+          </div>
+          <div>
+            <span>Productivity gain passed to real wages</span>
+            <strong>{percent(config.policy.productivityWageShare)}</strong>
+          </div>
+          <div>
+            <span>Pension / prior earnings</span>
+            <strong>{percent(config.policy.pensionReplacementRate)}</strong>
+          </div>
+          <div>
+            <span>Pension contribution, worker + employer</span>
+            <strong>{percent(config.policy.pensionContributionRate / 2)} + {percent(config.policy.pensionContributionRate / 2)}</strong>
+          </div>
+          <div>
+            <span>Annual liquid savings drawdown</span>
+            <strong>{percent(config.policy.savingsDrawdownRate)}</strong>
+          </div>
+          <div>
+            <span>Opening financial history</span>
+            <strong>{config.openingHistoryYears} accounting years</strong>
           </div>
           <div>
             <span>AI / robotics fee per replaced role</span>
@@ -891,13 +1007,13 @@ function Model({
           Job types are a simplified occupational split, including physical
           service work under “blue-collar.” Wages and company sizes vary by
           sector. Matching assumes workers can move between sectors within their
-          job type; no retraining, migration, inflation, aging, or new firms are
+          job type; no retraining, migration, inflation, or new firms are
           modeled.
         </p>
         <p>
-          All goods, services, and automation are local. Household budgets
-          include dependents; pension income and pre-existing wealth are omitted.
-          Savings and ownership wealth accumulate from zero. Investment is financed by available cash and limited by consumer demand. Internal supplier purchases are
+          Ages use synthetic uniform cohorts; all young residents enter at 20 and active residents permanently exit at 65. Retirees retain savings and ownership. All goods, services, and automation are local. Household budgets
+          include dependents; pensions replace a configured share of prior earnings and are paid from the city budget, with payroll contributions recorded as tax revenue.
+          Opening savings, retained profits, debt, and dividends come from {config.openingHistoryYears} illustrative accounting periods at initial jobs and wages. These establish financial balances without aging residents or changing employment; they are not observed history or extra forecast years. Investment is financed by available cash and limited by consumer demand. Internal supplier purchases are
           modeled without separate input bottlenecks. Government can borrow
           locally without a debt limit or interest cost. Loss-making firms with sharply reduced sales close when their sector has excess capacity; the last supplier remains to preserve local supply links.
         </p>

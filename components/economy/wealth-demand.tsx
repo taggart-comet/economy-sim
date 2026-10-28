@@ -1,11 +1,11 @@
 "use client";
 import { ResponsiveContainer, ComposedChart, Line, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
-import type { SimulationResult, YearResult } from "@/domain/types";
+import type { CityConfig, SimulationResult, YearResult } from "@/domain/types";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2 }).format(n);
 const percent = (n: number) => `${(n * 100).toFixed(1)}%`;
 const count = (n: number) => n.toLocaleString("en-US");
-export function WealthDemand({ result, selected }: { result: SimulationResult; selected: YearResult }) {
+export function WealthDemand({ config, result, selected }: { config: CityConfig; result: SimulationResult; selected: YearResult }) {
   const history = result.years.map((y) => ({ year: y.year, idle: y.idleCapital / 1e9, invested: y.investment / 1e9, blocked: y.demandBlockedInvestment / 1e9 }));
   const lorenz = selected.lorenz.map((p) => ({ population: p.population * 100, wealth: p.wealth * 100, equality: p.population * 100 }));
   return <div className="wealth-demand">
@@ -33,7 +33,7 @@ export function WealthDemand({ result, selected }: { result: SimulationResult; s
             <Area dataKey="wealth" name="Actual wealth share" stroke="#3469e5" fill="#e9effd" strokeWidth={2} isAnimationActive={false} />
           </ComposedChart></ResponsiveContainer>
         </div>
-        <div className="table-footnote">{count(selected.shareholders)} shareholders hold {percent(selected.shareholderWealthShare)} of household-owned wealth. Each labor-force member represents one budget including dependents. Starting wealth is zero; property values and historical fortunes are excluded.</div>
+        <div className="table-footnote">{count(selected.shareholders)} shareholders hold {percent(selected.shareholderWealthShare)} of household-owned wealth. Each labor-force member represents one budget including dependents. Opening balances come from {config.openingHistoryYears} illustrative accounting periods at the starting jobs and wages; property values and observed historical fortunes are excluded.</div>
       </section>
       <section className="panel detail-panel">
         <h2>When capital has nowhere to go</h2><p>Cash accumulates as demand limits investment opportunities</p>
@@ -50,11 +50,18 @@ export function WealthDemand({ result, selected }: { result: SimulationResult; s
           </ComposedChart></ResponsiveContainer>
         </div>
         <div className="table-footnote">Idle cash is a stock; investment is an annual flow. Demand-blocked investment measures affordable opportunities lost relative to starting demand. Other idle cash may reflect ordinary saving or limited production capacity.</div>
+        <details className="table-footnote investment-explainer">
+          <summary>Who invests, and where does the money go?</summary>
+          <p>In {selected.year}, households finance {money(selected.investmentFunding.households)} and companies finance {money(selected.investmentFunding.companies)} of the {money(selected.investment)} delivered investment ({percent(selected.investment / selected.gdp || 0)} of GDP). Household cash is used in proportion to each balance, followed by retained company cash. Investors exchange cash for generic investment assets; suppliers receive sales revenue.</p>
+          <p>The planned budget is {percent(config.policy.investmentShare)} of planned household consumption, reduced when consumption falls below its starting level and capped by available funding. It is not a percentage of GDP growth.</p>
+          <p>Planned purchases: {Object.entries(config.investmentLinks).map(([id, share]) => `${percent(share)} ${config.sectors.find(s => s.id === id)!.name}`).join(" · ")}. Actual deliveries depend on each sector’s capacity.</p>
+          <p>Opening balances use {config.openingHistoryYears} illustrative accounting periods; forecast years start afterward. Capital depreciation, individual investment projects, and returns on investment assets remain unmodeled.</p>
+        </details>
       </section>
     </div>
     <section className="panel detail-panel">
-      <h2>The demand → closure → layoff cycle</h2>
-      <p>Citizens set demand by category. Larger firms gain share as demand falls; small, loss-making firms close first when their sector has excess capacity. Displaced workers reduce next year’s demand.</p>
+      <h2>Purchasing power → staffing → incomes</h2>
+      <p>Household spending, public purchases, and funded investment become company orders. One staffing target determines hiring or layoffs; small firms with persistent losses and severely reduced orders can close when their sector has excess capacity. Changed incomes feed the next decision.</p>
       <div className="wealth-metrics">
         <div><span>Shareholder dividends</span><strong>{money(selected.dividends)}</strong><small>paid from previous-year profits</small></div>
         <div><span>Shareholder consumption</span><strong>{money(selected.shareholderConsumption)}</strong><small>total purchases after spending caps</small></div>
@@ -66,7 +73,7 @@ export function WealthDemand({ result, selected }: { result: SimulationResult; s
           const smallRevenue = selected.companies.filter((c) => c.sector === s.id && c.initialWorkers.white + c.initialWorkers.blue <= 50).reduce((sum, c) => sum + c.revenue, 0);
           return <TableRow key={s.id}><TableCell>{s.name}</TableCell><TableCell>{percent(s.initialRevenue ? s.revenue / s.initialRevenue - 1 : 0)}</TableCell><TableCell>{percent(s.revenue ? smallRevenue / s.revenue : 0)}</TableCell><TableCell>{count(s.companies)} / {count(s.closedCompanies)}</TableCell></TableRow>;
         })}</TableBody></Table>
-      <div className="table-footnote">Small firms start with ≤50 employees. Closures follow prior-year results and cancel automation contracts. Shareholders retain ownership even after closure, as unpaid proprietors; they are never laid off.</div>
+      <div className="table-footnote">Small firms start with ≤50 employees. Closures require both prior losses and losses projected from current funded orders, and cancel automation contracts. Shareholders retain ownership even after closure, as unpaid proprietors; they are never laid off.</div>
     </section>
     <section className="panel detail-panel"><h2>Wealth & demand by year</h2>
       <Table><TableHeader><TableRow><TableHead>Year</TableHead><TableHead>Top 1% share</TableHead><TableHead>Idle cash</TableHead><TableHead>Investment</TableHead><TableHead>Demand-blocked</TableHead><TableHead>New closures</TableHead><TableHead>Closure layoffs</TableHead></TableRow></TableHeader><TableBody>

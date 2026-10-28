@@ -16,6 +16,8 @@ export function validateConfig(c: CityConfig) {
     );
   if (!Number.isInteger(c.years) || c.years < 1 || c.years > 10)
     throw new Error("Forecast must span 1–10 years");
+  if (!Number.isInteger(c.openingHistoryYears) || c.openingHistoryYears < 0 || c.openingHistoryYears > 10)
+    throw new Error("Opening financial history must span 0–10 accounting years");
   for (const k of [
     "adultShare",
     "participationRate",
@@ -23,6 +25,9 @@ export function validateConfig(c: CityConfig) {
     "unemployedWhiteShare",
   ] as const)
     rate(c[k], k);
+  if (!Number.isInteger(c.workforceEntryAge) || !Number.isInteger(c.retirementAge) ||
+      c.workforceEntryAge < 1 || c.retirementAge <= c.workforceEntryAge || c.retirementAge > 85)
+    throw new Error("Workforce ages must be integers with 1 <= entry < retirement <= 85");
   if (c.adultShare * c.participationRate === 0)
     throw new Error("City requires a labor force");
   if (Math.abs(c.sectors.reduce((n, s) => n + s.employmentShare, 0) - 1) > 1e-9)
@@ -60,6 +65,10 @@ export function validateConfig(c: CityConfig) {
     "matchingRate",
     "demandAdjustment",
     "productivityGrowth",
+    "productivityWageShare",
+    "pensionReplacementRate",
+    "pensionContributionRate",
+    "savingsDrawdownRate",
     "intermediateShare",
     "investmentShare",
   ] as const)
@@ -68,6 +77,8 @@ export function validateConfig(c: CityConfig) {
     rate(c.policy.automationEfficiency[role], "Automation efficiency");
     rate(c.household.propensity[role], "Spending propensity");
   }
+  if (c.policy.incomeTax + c.policy.pensionContributionRate / 2 > 1)
+    throw new Error("Employee income tax and pension contribution must not exceed earnings");
   for (const n of [
     c.policy.annualBenefit,
     c.policy.governmentPerResident,

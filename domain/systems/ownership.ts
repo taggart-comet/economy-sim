@@ -21,7 +21,7 @@ export function assignShareholders(city: City) {
       candidates.add(c.id);
   }
   const employees = new Map<number, number[]>();
-  for (let i = 0; i < p.laborForce; i++) {
+  for (let i = 0; i < p.count; i++) {
     const employer = p.employer[i];
     if (candidates.has(employer) && p.ownerCompany[i] < 0) {
       const list = employees.get(employer) ?? [];
@@ -50,7 +50,7 @@ export function payDividends(city: City) {
     c.retainedCapital -= payments[c.id];
     c.dividend = 0;
   }
-  for (let i = 0; i < p.laborForce; i++) {
+  for (let i = 0; i < p.count; i++) {
     const id = p.ownerCompany[i];
     if (id >= 0) p.dividends[i] = payments[id] / cs[id].shareholderCount;
   }
@@ -58,10 +58,10 @@ export function payDividends(city: City) {
 
 export function wealthAccounts(city: City) {
   const { companies: cs, citizens: p } = city;
-  const values = new Float64Array(p.laborForce);
+  const values = new Float64Array(p.count);
   let total = 0, ownerWealth = 0, shareholders = 0, dividends = 0;
   let idleCapital = cs.reduce((sum, c) => sum + c.retainedCapital, 0);
-  for (let i = 0; i < p.laborForce; i++) {
+  for (let i = 0; i < p.count; i++) {
     const id = p.ownerCompany[i];
     const equity = id < 0 ? 0 : Math.max(0, cs[id].retainedCapital + cs[id].investedCapital - cs[id].operatingDebt) / cs[id].shareholderCount;
     values[i] = p.wealth[i] + p.investedWealth[i] + equity;
@@ -73,7 +73,7 @@ export function wealthAccounts(city: City) {
   values.sort();
   let cumulative = 0, weighted = 0, top = 0;
   const lorenz = [{ population: 0, wealth: 0 }];
-  const topCount = Math.max(1, Math.ceil(p.laborForce * 0.01));
+  const topCount = Math.max(1, Math.ceil(p.count * 0.01));
   for (let i = 0; i < values.length; i++) {
     cumulative += values[i];
     weighted += (i + 1) * values[i];

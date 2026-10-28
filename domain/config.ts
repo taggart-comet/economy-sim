@@ -1,3 +1,4 @@
+import { createLayoffPreset } from "./scenario";
 import type { CityConfig, SectorConfig, YearPolicy } from "./types";
 /** US-inspired synthetic archetypes; these sector counts, role mixes and wages are assumptions.
  * Sourced benchmarks and exact transformations are documented in docs/MODEL.md. */
@@ -33,6 +34,9 @@ export const DEFAULT_CONFIG: CityConfig = {
   participationRate: 0.624,
   initialUnemployment: 0.044,
   unemployedWhiteShare: 0.55,
+  workforceEntryAge: 20,
+  retirementAge: 65,
+  openingHistoryYears: 3,
   sectors: [
     sector(
       "farming",
@@ -197,9 +201,14 @@ export const DEFAULT_CONFIG: CityConfig = {
     annualBenefit: 15080,
     incomeTax: 0.2,
     profitTax: 0.18,
-    matchingRate: 0.6,
+    matchingRate: 0.6, // Fraction matched when same-role candidate and opening counts are equal.
     demandAdjustment: 0.25,
     productivityGrowth: 0.015,
+    // Constant labor share for ordinary trend productivity, independent of automation.
+    productivityWageShare: 1,
+    pensionReplacementRate: 0.4,
+    pensionContributionRate: 0.124,
+    savingsDrawdownRate: 0.04,
     automationEfficiency: { white: 1, blue: 0.9 },
     automationFee: { white: 12000, blue: 18000 },
     baseServiceFee: { white: 500, blue: 500 },
@@ -218,13 +227,8 @@ export const DEFAULT_CONFIG: CityConfig = {
     other: { services: 0.45, software: 0.25, education: 0.3 },
   },
 };
-export const DEFAULT_SCENARIO: YearPolicy[] = Array.from(
-  { length: 5 },
-  (_, i) => ({
-    year: 2026 + i,
-    white: [0.1, 0.08, 0.06, 0.04, 0.02][i],
-    blue: [0.05, 0.05, 0.04, 0.03, 0.02][i],
-  }),
+export const DEFAULT_SCENARIO: YearPolicy[] = createLayoffPreset(
+  "normal", DEFAULT_CONFIG.startYear, DEFAULT_CONFIG.years,
 );
 export const SOURCES = [
   {
@@ -251,5 +255,20 @@ export const SOURCES = [
     title: "US DOL · Federal minimum wage",
     url: "https://www.dol.gov/general/topic/wages",
     note: "$7.25/hour × 2,080 hours = $15,080 annual benefit assumption; not actual unemployment insurance.",
+  },
+  {
+    title: "US DOL · Retirement income",
+    url: "https://www.dol.gov/agencies/ebsa/about-ebsa/our-activities/resource-center/publications/top-10-ways-to-prepare-for-retirement",
+    note: "Approximate 40% replacement benchmark. The model uses synthetic prior earnings, not the actual Social Security formula.",
+  },
+  {
+    title: "SSA · Pension financing",
+    url: "https://www.ssa.gov/news/en/press/how-is-social-security-financed.html",
+    note: "6.2% worker and 6.2% employer contributions. The model simplifies coverage and omits the taxable earnings ceiling.",
+  },
+  {
+    title: "BLS · Productivity and labor costs",
+    url: "https://www.bls.gov/opub/hom/opt/calculation.htm",
+    note: "Compensation and productivity determine unit labor costs. Full wage sharing of ordinary productivity growth is a model assumption, not an estimated forecast.",
   },
 ];

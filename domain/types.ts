@@ -32,6 +32,9 @@ export interface CityConfig {
   participationRate: number;
   initialUnemployment: number;
   unemployedWhiteShare: number;
+  workforceEntryAge: number;
+  retirementAge: number;
+  openingHistoryYears: number; // Accounting periods at initial jobs/wages, before the forecast.
   sectors: SectorConfig[];
   household: { employed: Spending; unemployed: Spending; propensity: Pair };
   policy: {
@@ -41,6 +44,10 @@ export interface CityConfig {
     matchingRate: number;
     demandAdjustment: number;
     productivityGrowth: number;
+    productivityWageShare: number;
+    pensionReplacementRate: number;
+    pensionContributionRate: number;
+    savingsDrawdownRate: number;
     automationEfficiency: Pair;
     automationFee: Pair;
     baseServiceFee: Pair;
@@ -72,6 +79,10 @@ export interface Company {
   wages: Pair;
   revenue: number;
   initialRevenue: number;
+  initialPayroll: number;
+  initialOperatingIncome: number; // Sales net of intermediate inputs and service fees.
+  expectedOrders: number; // Funded orders used in the latest staffing decision.
+  desiredWorkers: Pair;
   previousRevenue: number;
   intermediateCosts: number;
   automationCosts: number;
@@ -82,10 +93,14 @@ export interface Company {
 export interface CitizenPopulation {
   count: number;
   laborForce: number;
+  age: Uint16Array;
+  retired: Uint8Array; // Permanent labor-force exit
   role: Uint8Array; // 0 = outside labor force; 1 = white; 2 = blue
   employer: Int32Array; // -1 = unemployed / outside labor force
   lastEmployer: Int32Array;
   salary: Float64Array;
+  referenceSalary: Float64Array; // Most recent earnings; retained through unemployment.
+  pension: Float64Array; // Annual retirement entitlement, funded by the city budget.
   ownerCompany: Int32Array; // Persistent ownership; -1 for non-shareholders
   dividends: Float64Array;
   wealth: Float64Array; // Liquid savings accumulated since simulation start
@@ -96,10 +111,13 @@ export interface CitizenPopulation {
 }
 export interface Citizen {
   id: number;
+  age: number;
+  retired: boolean;
   role: Role | "dependent";
   employerId: number | null;
   lastEmployerId: number | null;
   annualSalary: number;
+  annualPension: number;
   shareholderOf: number | null;
   wealth: number;
   dividend: number;
@@ -121,6 +139,9 @@ export interface YearPolicy {
 export interface SectorResult {
   id: string;
   name: string;
+  /** Actual job separations in this year, before any subsequent rehiring. */
+  directLayoffs: number;
+  demandLayoffs: number;
   companies: number;
   closedCompanies: number;
   workers: Pair;
@@ -130,7 +151,28 @@ export interface SectorResult {
   initialRevenue: number;
   payroll: number;
 }
+export interface AgeGroup {
+  label: string;
+  minAge: number;
+  maxAge: number | null;
+  residents: number;
+  employed: number;
+  unemployed: number;
+  inactive: number;
+}
+export interface DemographicProfile {
+  ageGroups: AgeGroup[];
+  horizonYears: number;
+  upcomingEntrants: number;
+  upcomingExits: number;
+}
 export interface YearResult {
+  demographics: DemographicProfile;
+  laborForce: number;
+  workforceEntrants: number;
+  workforceExits: number;
+  employedExits: number;
+  unemployedExits: number;
   year: number;
   gdp: number;
   unemploymentRate: number;
@@ -159,9 +201,12 @@ export interface YearResult {
   consumption: number;
   unmetDemand: number;
   benefitCost: number;
+  pensionCost: number;
+  pensionContributions: number;
   taxRevenue: number;
   governmentPurchases: number;
   investment: number;
+  investmentFunding: { households: number; companies: number };
   budgetBalance: number;
   cumulativeBalance: number;
   aiRevenue: number;

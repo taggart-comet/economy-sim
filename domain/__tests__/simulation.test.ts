@@ -19,8 +19,30 @@ const config: CityConfig = {
   })),
 };
 const zero = DEFAULT_SCENARIO.map((p) => ({ ...p, white: 0, blue: 0 }));
+// Keep the closure/contagion fixture an explicit stress case, independent of startup defaults.
+const stressScenario = DEFAULT_SCENARIO.map((p, i) => ({
+  ...p,
+  white: [0.10, 0.08, 0.06, 0.04, 0.02][i],
+  blue: [0.05, 0.05, 0.04, 0.03, 0.02][i],
+}));
 const noLayoffs = simulate(config, zero),
-  shock = simulate(config, DEFAULT_SCENARIO);
+  shock = simulate(config, stressScenario);
+test("industry layoffs reconcile with annual totals and reset each year, including closures", () => {
+  for (const result of [noLayoffs, shock]) {
+    assert.ok(result.initial.sectors.every(s => s.directLayoffs === 0 && s.demandLayoffs === 0));
+    for (const y of result.years) {
+      assert.equal(y.sectors.reduce((n, s) => n + s.directLayoffs, 0), y.layoffs.white + y.layoffs.blue);
+      assert.equal(y.sectors.reduce((n, s) => n + s.demandLayoffs, 0), y.demandLayoffs);
+      for (const s of y.sectors) {
+        assert.ok(Number.isInteger(s.directLayoffs) && s.directLayoffs >= 0);
+        assert.ok(Number.isInteger(s.demandLayoffs) && s.demandLayoffs >= 0);
+        if (config.sectors.find(c => c.id === s.id)?.provider) assert.equal(s.directLayoffs, 0);
+        if (result === noLayoffs) assert.equal(s.directLayoffs, 0);
+      }
+    }
+  }
+  assert.ok(shock.years.some(y => y.closureLayoffs > 0), "exercise closure layoffs as part of the indirect total");
+});
 test("factories conserve population and employment; citizen employer links match company counts", () => {
   const c = CityFactory.create(config),
     counts = c.companies.map(() => ({ white: 0, blue: 0 }));
@@ -53,11 +75,11 @@ test("every forecast year conserves people, employment transitions and GDP accou
     for (const y of result.years) {
       assert.equal(
         y.employed.white + y.employed.blue + y.unemployed,
-        result.laborForce,
+        y.laborForce,
       );
       assert.equal(
         y.unemployed,
-        prior.unemployed +
+        prior.unemployed + y.workforceEntrants - y.unemployedExits +
           y.layoffs.white +
           y.layoffs.blue +
           y.demandLayoffs -
@@ -75,10 +97,16 @@ test("every forecast year conserves people, employment transitions and GDP accou
       assert.ok(
         Math.abs(
           y.budgetBalance -
-            (y.taxRevenue - y.benefitCost - y.governmentPurchases),
+            (y.taxRevenue - y.benefitCost - y.pensionCost - y.governmentPurchases),
         ) < 0.01,
       );
       assert.equal(y.benefitCost, y.unemployed * config.policy.annualBenefit);
+      assert.ok(Math.abs(y.investmentFunding.households + y.investmentFunding.companies - y.investment) < 0.01);
+      const grossWages = y.companies.reduce((sum, c) => sum + c.payroll, 0) /
+        (1 + config.policy.pensionContributionRate / 2);
+      assert.ok(Math.abs(y.pensionContributions - grossWages * config.policy.pensionContributionRate) < 0.01);
+      const profitTax = y.companies.reduce((sum, c) => sum + Math.max(0, c.profit), 0) * config.policy.profitTax;
+      assert.ok(Math.abs(y.taxRevenue - profitTax - grossWages * config.policy.incomeTax - y.pensionContributions) < 0.01);
       for (const c of y.companies)
         for (const r of ["white", "blue"] as const) {
           assert.ok(Number.isInteger(c.workers[r]) && c.workers[r] >= 0);
@@ -99,13 +127,13 @@ test("white/blue automation pay the correct provider exactly and persist into su
   );
   assert.equal(
     whiteOnly.years[0].aiAutomationRevenue,
-    whiteOnly.years[0].layoffs.white * config.policy.automationFee.white,
+    whiteOnly.years[0].companies.reduce((sum, c) => sum + c.automated.white * config.policy.automationFee.white, 0),
   );
   assert.equal(whiteOnly.years[0].roboticsAutomationRevenue, 0);
   assert.equal(blueOnly.years[0].aiAutomationRevenue, 0);
   assert.equal(
     blueOnly.years[0].roboticsAutomationRevenue,
-    blueOnly.years[0].layoffs.blue * config.policy.automationFee.blue,
+    blueOnly.years[0].companies.reduce((sum, c) => sum + c.automated.blue * config.policy.automationFee.blue, 0),
   );
   assert.equal(
     whiteOnly.years[1].aiAutomationRevenue,
@@ -159,7 +187,7 @@ test("full automation is bounded and zero benefits / zero matching remain finite
 });
 test("same seed replays exactly without modifying input; future policies cannot change earlier years", () => {
   const before = JSON.stringify(config),
-    r = simulate(config, DEFAULT_SCENARIO);
+    r = simulate(config, stressScenario);
   assert.deepEqual(r, shock);
   assert.equal(JSON.stringify(config), before);
   const late = simulate(
@@ -246,10 +274,11 @@ test("demand closures remove small firms first, release employees and cancel sup
   }
   const labor = transitionLabor(city, { year: 2027, white: 0, blue: 0 }, 1);
   const closed = retail.filter((c) => c.closed), active = retail.filter((c) => !c.closed);
+  const allClosed = city.companies.filter(c => c.closed);
   assert.ok(closed.length > 0 && active.length > 0);
   const size = (c: typeof retail[number]) => c.initialWorkers.white + c.initialWorkers.blue;
   assert.ok(Math.max(...closed.map(size)) <= Math.min(...active.map(size)));
-  assert.equal(labor.closureLayoffs, closed.reduce((sum, c) => sum + size(c), 0));
+  assert.equal(labor.closureLayoffs, allClosed.reduce((sum, c) => sum + size(c) - c.shareholderCount, 0));
   for (const c of closed) {
     assert.equal(c.workers.white + c.workers.blue, 0);
     assert.equal(c.vacancies.white + c.vacancies.blue, 0);
@@ -294,4 +323,32 @@ test("zero incomes and benefits leave no wealth, NaNs or unfunded investment", (
     assert.equal(y.wealthGini, 0);
     assert.equal(y.householdWealth, 0);
   }
+});
+
+
+test("baseline supports replacement hiring and demand shocks still contract employment", () => {
+  const result = simulate(DEFAULT_CONFIG, zero);
+  for (const year of result.years) {
+    assert.deepEqual(year.layoffs, { white: 0, blue: 0 });
+    assert.equal(year.aiAutomationRevenue + year.roboticsAutomationRevenue, 0);
+    assert.equal(year.closedCompanies, 0);
+    // Diagnostic bounds only: none of these numbers is used by the simulation.
+    assert.ok(year.unemploymentRate < 0.10);
+    assert.ok(year.gdp > result.initial.gdp * 0.95);
+    assert.ok(year.demandLayoffs < result.initial.laborForce * 0.001);
+  }
+  assert.ok(result.years.at(-1)!.hires.white + result.years.at(-1)!.hires.blue > 0.9 * result.years.at(-1)!.employedExits);
+  assert.ok(result.years.at(-1)!.unemploymentRate > 0, "search friction survives abundant vacancies");
+  const shocked = simulate(DEFAULT_CONFIG, DEFAULT_SCENARIO);
+  assert.ok(shocked.years.at(-1)!.unemploymentRate > result.years.at(-1)!.unemploymentRate);
+});
+
+test("a severe automation shock retains search friction but fills most openings when candidates are plentiful", () => {
+  const result = simulate(DEFAULT_CONFIG, zero.map(p => ({ ...p, white: 0.1, blue: 0.1 })));
+  const last = result.years.at(-1)!;
+  const offered = last.hires.white + last.hires.blue + last.vacancies;
+  assert.ok(last.unemploymentRate > 0.3, "matching cannot create the missing jobs");
+  assert.ok(offered > 0);
+  assert.ok(last.vacancies > 0, "search friction remains in this large market");
+  assert.ok(last.vacancies / offered < 0.05, "surplus candidates no longer leave 40% of openings vacant");
 });

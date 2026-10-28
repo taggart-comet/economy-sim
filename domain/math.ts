@@ -25,3 +25,14 @@ export function random(seed: number): () => number {
     return n / 4294967296;
   };
 }
+
+/** Round fractional jobs once per market, conserving the nearest whole-job total. */
+export function roundCounts(values: number[]): number[] {
+  const counts = values.map(v => Math.floor(v + 1e-9));
+  const total = Math.round(values.reduce((sum, v) => sum + v, 0));
+  const order = values.map((v, i) => ({ i, remainder: v - counts[i] }))
+    .sort((a, b) => b.remainder - a.remainder || a.i - b.i);
+  for (let n = total - counts.reduce((sum, v) => sum + v, 0), i = 0; i < n; i++)
+    counts[order[i].i]++;
+  return counts;
+}
